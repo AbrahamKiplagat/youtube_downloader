@@ -6,18 +6,21 @@ import dotenv from 'dotenv';
 dotenv.config();
 const app = express();
 
-// Clear ytdl-core cache
+// Clear cache to handle YouTube updates
 ytdl.cache.sig.clear();
 ytdl.cache.info.clear();
 ytdl.cache.cookie.clear();
 
+// CORS configuration
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  methods: ['GET', 'POST'],
   credentials: true
 }));
 
 app.use(express.json());
 
+// Video information endpoint (720p MP4 only)
 app.post('/api/info', async (req, res) => {
   try {
     const { url } = req.body;
@@ -36,34 +39,47 @@ app.post('/api/info', async (req, res) => {
       }
     });
 
-    const formats = ytdl.filterFormats(info.formats, 'videoandaudio');
-    
+    // Find 720p MP4 format with both audio and video
+    const format720 = info.formats.find(f => 
+      f.qualityLabel === '720p' &&
+      f.container === 'mp4' &&
+      f.hasAudio &&
+      f.hasVideo
+    );
+
+    if (!format720) {
+      return res.status(404).json({ 
+        error: '720p MP4 format not available for this video' 
+      });
+    }
+
     res.json({
       title: info.videoDetails.title,
-      duration: info.videoDetails.lengthSeconds,
+      duration: parseInt(info.videoDetails.lengthSeconds),
       thumbnail: info.videoDetails.thumbnails.sort((a, b) => b.width - a.width)[0].url,
-      formats: formats.map(format => ({
-        quality: format.qualityLabel,
-        container: format.container,
-        bitrate: format.bitrate,
-        url: format.url
-      }))
+      contentLength: format720.contentLength,
+      itag: format720.itag
     });
 
   } catch (error) {
     console.error('Info Error:', error.message);
-    res.status(500).json({ 
-      error: error.message.includes("Could not extract functions") 
-        ? 'YouTube structure changed - please update ytdl-core' 
-        : error.message
+    res.status(500).json({
+      error: error.message.includes("Could not extract functions") ?
+        'YouTube structure changed - please update server' :
+        error.message
     });
   }
 });
 
+// Download endpoint (720p MP4 only)
 app.get('/api/download', async (req, res) => {
   try {
-    const { url, quality } = req.query;
+    const { url, itag } = req.query;
     
+    if (!ytdl.validateURL(url)) {
+      return res.status(400).send('Invalid YouTube URL');
+    }
+
     const info = await ytdl.getInfo(url, {
       requestOptions: {
         headers: {
@@ -73,14 +89,23 @@ app.get('/api/download', async (req, res) => {
       }
     });
 
-    const format = ytdl.chooseFormat(info.formats, { 
-      quality: quality || 'highest',
-      filter: 'videoandaudio'
-    });
+    // Verify itag matches 720p MP4
+    const format = info.formats.find(f => 
+      f.itag === parseInt(itag) &&
+      f.qualityLabel === '720p' &&
+      f.container === 'mp4' &&
+      f.hasAudio &&
+      f.hasVideo
+    );
+    
+    if (!format) {
+      return res.status(404).send('720p MP4 format not available');
+    }
 
     res.header({
-      'Content-Disposition': `attachment; filename="${info.videoDetails.title.replace(/[^\w]/g, '_')}.${format.container}"`,
-      'Content-Type': format.mimeType
+      'Content-Disposition': `attachment; filename="${info.videoDetails.title.replace(/[^\w]/g, '_')}.mp4"`,
+      'Content-Type': 'video/mp4',
+      'Content-Length': format.contentLength
     });
 
     ytdl(url, { format }).pipe(res);
@@ -91,6 +116,7 @@ app.get('/api/download', async (req, res) => {
   }
 });
 
+// Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
