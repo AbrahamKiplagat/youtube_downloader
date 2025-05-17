@@ -22,6 +22,7 @@ app.post('/api/info', async (req, res) => {
       })),
     });
   } catch (error) {
+    console.error('Error:', error);
     res.status(500).json({ error: 'Invalid URL or video unavailable' });
   }
 });
@@ -35,6 +36,7 @@ app.get('/api/download', async (req, res) => {
     res.header('Content-Disposition', `attachment; filename="video.mp4"`);
     ytdl(url, { format }).pipe(res);
   } catch (error) {
+    console.error('Download error:', error);
     res.status(500).send('Download failed');
   }
 });

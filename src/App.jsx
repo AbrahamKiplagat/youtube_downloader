@@ -17,7 +17,8 @@ function App() {
       const response = await axios.post('http://localhost:5000/api/info', { url });
       setVideoInfo(response.data);
     } catch (err) {
-      setError('Failed to fetch video info');
+      setError(`Failed to fetch video info: ${err.message}`);
+    
     } finally {
       setLoading(false);
     }
